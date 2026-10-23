@@ -1,5 +1,5 @@
 // Đóng gói extension/ thành dist/diaba-extension-vX.Y.Z.zip để đính kèm GitHub Release.
-// Workflow .github/workflows/release.yml gọi khi đẩy tag vX.Y.Z; chạy tay: node scripts/pack-extension.mjs
+// Workflow .github/workflows/release.yml gọi khi push lên main có đổi extension/; chạy tay: node scripts/pack-extension.mjs
 // In ra đường dẫn file zip ở dòng cuối (workflow đọc). Không cần thư viện ngoài.
 import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";

@@ -11,7 +11,8 @@
  * - Giờ: bảng <table> 7 ngày; ngày lễ sắp tới hiện kèm tên lễ / "giờ có thể khác".
  */
 
-// runAiFallback do ai-fallback.js cung cấp (nạp trước file này trong cùng isolated world).
+// runAiAgent do ai-fallback.js cung cấp (nạp trước file này trong cùng isolated world).
+// Script ở đây chỉ là đường tắt: lỗi / ra 0 → needsAi; kết luận "không có" → verify (AI kiểm lại).
 
 // Tiện ích chờ thời gian
 var wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -50,10 +51,33 @@ async function openMainTab(regex) {
   if (!tab) return null;
   if (tab.getAttribute("aria-selected") !== "true") {
     tab.click();
-    await waitFor(() => tab.getAttribute("aria-selected") === "true", 4000);
+    // Maps có thể vẽ lại cả thanh tab → tìm lại tab theo tên thay vì giữ phần tử cũ.
+    await waitFor(() => findMainTab(regex)?.getAttribute("aria-selected") === "true", 5000);
   }
-  await wait(1200); // nội dung tab render sau khi chọn
-  return tab;
+  await wait(600);
+  return findMainTab(regex) || tab;
+}
+
+/**
+ * Tóm tắt cấu trúc panel khi một mục đọc lỗi (không lấy dữ liệu cá nhân, chỉ nội dung công khai của hồ sơ):
+ * web hiện nút "Sao chép chẩn đoán" để dev sửa script đúng chỗ.
+ */
+function diagnose(section) {
+  const main = placePane();
+  if (!main) return { section, url: location.pathname.slice(0, 80), lang: document.documentElement.lang, error: "không có div[role=main]" };
+  const uniq = (arr, n) => [...new Set(arr.filter(Boolean))].slice(0, n);
+  return {
+    section,
+    url: location.pathname.slice(0, 80),
+    lang: document.documentElement.lang,
+    tabs: Array.from(main.querySelectorAll('[role="tab"]')).slice(0, 20).map((t) => `${norm(t.getAttribute("aria-label") || t.innerText).slice(0, 40)}${t.getAttribute("aria-selected") === "true" ? " *" : ""}`),
+    headings: uniq(Array.from(main.querySelectorAll('h1, h2, h3, [role="heading"]')).map((h) => norm(h.textContent).slice(0, 50)), 20),
+    regions: uniq(Array.from(main.querySelectorAll('[role="region"]')).map((r) => r.getAttribute("aria-label")), 10),
+    li: main.querySelectorAll("li").length,
+    liWithAria: Array.from(main.querySelectorAll("li")).filter((li) => li.querySelector("[aria-label]")).length,
+    aria: uniq(Array.from(main.querySelectorAll("[aria-label]")).map((e) => `${e.tagName.toLowerCase()}:${norm(e.getAttribute("aria-label")).slice(0, 60)}`), 30),
+    text: norm(main.innerText).slice(0, 600),
+  };
 }
 
 /** Đọc các thẻ món trong vùng menu: neo theo tên món (hoặc theo giá nếu không có tên), leo lên tới khung chỉ chứa đúng một món. */
@@ -92,11 +116,12 @@ var menuRegion = (main) =>
 async function collectMenu() {
   const steps = [];
   try {
-    const main = await waitForPlace();
+    let main = await waitForPlace();
     if (!main) return { ok: false, source: "script", error: "Không mở được hồ sơ quán trên Maps", steps };
     const tab = await openMainTab(/^(thực\s*đơn|menu)\b/i);
+    main = placePane() || main;
     if (!tab) {
-      return { ok: true, source: "script", data: { categories: [], noTextMenu: true }, detail: "Hồ sơ không có tab Thực đơn", steps };
+      return { ok: true, verify: true, source: "script", data: { categories: [], noTextMenu: true }, detail: "Hồ sơ không có tab Thực đơn", steps };
     }
     steps.push({ action: "click_tab", label: "Thực đơn" });
 
@@ -112,18 +137,18 @@ async function collectMenu() {
         const chip = chips[i];
         const section = norm(chip.getAttribute("aria-label") || chip.innerText) || "Thực đơn";
         reportProgress("menu", "running", `Đọc nhóm ${i + 1}/${chips.length}: ${section}`);
-        const before = norm(menuRegion(main)?.innerText);
+        const before = norm(menuRegion(placePane() || main)?.innerText);
         chip.click();
         await waitFor(() => chip.getAttribute("aria-selected") === "true", 3000);
-        await waitFor(() => norm(menuRegion(main)?.innerText) !== before, 2500);
+        await waitFor(() => norm(menuRegion(placePane() || main)?.innerText) !== before, 2500);
         await wait(400);
-        const items = menuItemsIn(menuRegion(main));
+        const items = menuItemsIn(menuRegion(placePane() || main));
         steps.push({ action: "read_menu_section", section, items: items.length });
         if (items.length) categories.push({ section, items });
       }
     } else {
       // Không có nhóm món: chỉ nhận món có giá — phần "Điểm nổi bật" (chỉ tên món) và thẻ link menu ngoài không phải menu chữ.
-      const items = menuItemsIn(menuRegion(main)).filter((it) => it.price);
+      const items = menuItemsIn(menuRegion(placePane() || main)).filter((it) => it.price);
       if (items.length) categories.push({ section: "Thực đơn", items });
     }
 
@@ -136,16 +161,8 @@ async function collectMenu() {
     }
 
     if (chips.length) {
-      // Có nhóm món mà không đọc được món nào → giao diện đổi, nhờ AI đọc.
-      steps.push({ action: "trigger_ai_fallback", target: "menu" });
-      const aiResult = await runAiFallback("menu");
-      return {
-        ok: aiResult.ok,
-        source: "ai",
-        data: aiResult.data || { categories: [], menuPhotosOnly: false },
-        steps: [...steps, ...(aiResult.steps || [])],
-        error: aiResult.error,
-      };
+      // Có nhóm món mà không đọc được món nào → giao diện đổi, giao cho AI agent.
+      return { ok: false, needsAi: true, source: "script", error: `Có ${chips.length} nhóm món nhưng script không đọc được món`, steps, diag: diagnose("menu") };
     }
 
     // Tab Thực đơn chỉ có món nổi bật / ảnh / link menu ngoài: hồ sơ không có menu chữ.
@@ -153,6 +170,7 @@ async function collectMenu() {
     const hasLink = /liên kết menu|menu link/i.test(labels);
     return {
       ok: true,
+      verify: true,
       source: "script",
       data: { categories: [], menuPhotosOnly: false, noTextMenu: true },
       detail: hasLink ? "Không có menu chữ trên Maps (chỉ có món nổi bật + link menu ngoài)" : "Không có menu chữ trên Maps (chỉ có món nổi bật/ảnh)",
@@ -173,50 +191,67 @@ function headingBefore(el, main) {
   return found;
 }
 
+// aria-label của tiện ích trên Maps: "Có …", "Không có …", "Phục vụ …", "Bán …", "Chấp nhận …" (hoặc tiếng Anh "Has …", "No …", "Serves …").
+var ATTR_ARIA_RE = /^(có|không|chưa|phục vụ|bán|chấp nhận|nhận|cho phép|thích hợp|phù hợp|dành cho|has|have|no|not|serves|accepts|offers|doesn't|does not|good for|free|paid)\b/i;
+var ATTR_NEGATIVE_RE = /^(không|chưa|no|not|doesn't|does not)\b/i;
+
+/** Danh sách tiện ích trên tab Giới thiệu: ưu tiên li > [aria-label]; giao diện khác thì quét mọi [aria-label] dạng "Có …/Không có …". */
+function attributeItems(main) {
+  const out = [];
+  const seen = new Set();
+  const add = (el, aria, label) => {
+    if (!aria || !label || label.length > 80) return;
+    const group = headingBefore(el, main);
+    const key = `${group}|${label}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ group, label, negative: ATTR_NEGATIVE_RE.test(aria) });
+  };
+  for (const li of main.querySelectorAll("li")) {
+    const span = li.querySelector("[aria-label]");
+    add(li, norm(span?.getAttribute("aria-label")), norm(span?.textContent));
+  }
+  if (out.length) return out;
+  for (const el of main.querySelectorAll("[aria-label]")) {
+    if (el.closest('button, a, [role="tab"], [role="button"], [role="link"]')) continue;
+    const aria = norm(el.getAttribute("aria-label"));
+    if (!ATTR_ARIA_RE.test(aria)) continue;
+    add(el, aria, norm(el.textContent) || aria);
+  }
+  return out;
+}
+
 /**
  * Thu thập tiện ích & dịch vụ (Attributes từ tab About / Giới thiệu)
  */
 async function collectAttributes() {
   const steps = [];
   try {
-    const main = await waitForPlace();
-    if (!main) return { ok: false, source: "script", error: "Không mở được hồ sơ quán trên Maps", steps };
+    if (!(await waitForPlace())) return { ok: false, source: "script", error: "Không mở được hồ sơ quán trên Maps", steps, diag: diagnose("attributes") };
     const tab = await openMainTab(/^(giới\s*thiệu|about)\b/i);
-    if (!tab) return { ok: true, source: "script", data: { available: [], unavailable: [] }, detail: "Hồ sơ không có tab Giới thiệu", steps };
+    if (!tab) return { ok: true, verify: true, source: "script", data: { available: [], unavailable: [] }, detail: "Hồ sơ không có tab Giới thiệu", steps };
     steps.push({ action: "click_tab", label: "Giới thiệu" });
 
-    const available = [];
-    const unavailable = [];
-    const seen = new Set();
-    for (const li of main.querySelectorAll("li")) {
-      const span = li.querySelector("[aria-label]");
-      const aria = norm(span?.getAttribute("aria-label"));
-      const label = norm(span?.textContent);
-      if (!aria || !label) continue;
-      const group = headingBefore(li, main);
-      const key = `${group}|${label}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      // Maps ghi rõ trong aria-label: "Có …", "Phục vụ …" = có; "Không có …", "Không phục vụ …" = không có.
-      if (/^(không|chưa|no|not|doesn't|does not)\b/i.test(aria)) unavailable.push({ group, label });
-      else available.push({ group, label });
+    // Chờ nội dung tab thật sự xuất hiện (máy chậm / sau nhiều thao tác Maps tải chậm), luôn đọc panel mới nhất.
+    let items = [];
+    await waitFor(() => (items = attributeItems(placePane())).length > 0, 10000);
+    steps.push({ action: "read_attributes", items: items.length });
+
+    if (items.length) {
+      return {
+        ok: true,
+        source: "script",
+        data: {
+          available: items.filter((i) => !i.negative).map(({ group, label }) => ({ group, label })),
+          unavailable: items.filter((i) => i.negative).map(({ group, label }) => ({ group, label })),
+        },
+        steps,
+      };
     }
 
-    if (available.length || unavailable.length) {
-      return { ok: true, source: "script", data: { available, unavailable }, steps };
-    }
-
-    steps.push({ action: "trigger_ai_fallback", target: "attributes" });
-    const aiResult = await runAiFallback("attributes");
-    return {
-      ok: aiResult.ok,
-      source: "ai",
-      data: aiResult.data || { available: [], unavailable: [] },
-      steps: [...steps, ...(aiResult.steps || [])],
-      error: aiResult.error,
-    };
+    return { ok: false, needsAi: true, source: "script", error: "Script không đọc được tiện ích ở tab Giới thiệu", steps, diag: diagnose("attributes") };
   } catch (err) {
-    return { ok: false, source: "script", error: err.message, steps };
+    return { ok: false, source: "script", error: err.message, steps, diag: diagnose("attributes") };
   }
 }
 
@@ -230,10 +265,10 @@ async function collectSpecialHours() {
     const main = await waitForPlace();
     if (!main) return { ok: false, source: "script", error: "Không mở được hồ sơ quán trên Maps", steps };
     await openMainTab(/^(tổng\s*quan|overview)\b/i);
-    await waitFor(() => main.querySelector("table"), 3000);
-    const table = main.querySelector("table");
+    await waitFor(() => placePane()?.querySelector("table"), 5000);
+    const table = placePane()?.querySelector("table");
     if (!table) {
-      return { ok: true, source: "script", data: [], detail: "Hồ sơ không có bảng giờ mở cửa", steps };
+      return { ok: true, verify: true, source: "script", data: [], detail: "Hồ sơ không có bảng giờ mở cửa", steps };
     }
     const specialHours = [];
     for (const tr of table.querySelectorAll("tr")) {
@@ -258,18 +293,42 @@ async function collectSpecialHours() {
  * Lắng nghe thông điệp từ background hoặc popup
  */
 // Báo tiến trình từng mục về background → web (hiện checklist khi thu thập).
-var reportProgress = (section, status, detail) => {
-  try { chrome.runtime.sendMessage({ type: "diaba:progress", section, status, detail }); } catch { /* background đã đóng */ }
+var reportProgress = (section, status, detail, diag) => {
+  try { chrome.runtime.sendMessage({ type: "diaba:progress", section, status, detail, diag }); } catch { /* background đã đóng */ }
 };
-// Mỗi mục có hạn riêng (menu nhiều nhóm món cần lâu hơn); hết giờ thì đặt cờ để vòng đọc/AI dừng bấm tiếp.
+// Hạn của script (đường tắt) — hết hạn thì giao cho AI agent, không coi là lỗi.
 var SECTION_TIMEOUT_MS = { menu: 90000, attributes: 40000, special_hours: 30000 };
-var withDeadline = (section, promise) => Promise.race([
+// Hạn của AI agent mỗi mục (gồm cả thời gian chờ quota theo phút). Chỉ để chặn treo vô hạn.
+var AGENT_BUDGET_MS = { menu: 10 * 60000, attributes: 5 * 60000, special_hours: 4 * 60000 };
+var withDeadline = (stopKey, promise, ms) => Promise.race([
   promise,
-  wait(SECTION_TIMEOUT_MS[section] || 40000).then(() => {
-    window.__diabaStop = { ...(window.__diabaStop || {}), [section]: true };
-    return { ok: false, error: `Quá ${(SECTION_TIMEOUT_MS[section] || 40000) / 1000}s chưa xong` };
+  wait(ms).then(() => {
+    window.__diabaStop = { ...(window.__diabaStop || {}), [stopKey]: true };
+    return { ok: false, timedOut: true, error: `Quá ${Math.round(ms / 1000)}s chưa xong` };
   }),
 ]);
+
+/** Script trước; script lỗi / ra 0 / hết giờ → AI agent làm; script kết luận "không có" → AI kiểm lại. */
+async function collectSection(section, collect) {
+  // Options "Kiểm thử AI": bỏ qua script để kiểm AI agent tự làm được (Google đổi giao diện).
+  const forceAi = await new Promise((r) => { try { chrome.storage.local.get("forceAi", (v) => r(!!v?.forceAi)); } catch { r(false); } });
+  reportProgress(section, "running", forceAi ? "Kiểm thử AI: bỏ qua script…" : "Script đang đọc trang…");
+  const script = forceAi
+    ? { ok: false, needsAi: true, error: "kiểm thử AI (script bị tắt)", steps: [] }
+    : await withDeadline(section, collect(), SECTION_TIMEOUT_MS[section]);
+  const scriptOk = script.ok && script.data && !script.needsAi;
+  if (scriptOk && !script.verify) return script;
+  if (typeof runAiAgent !== "function") return scriptOk ? script : { ...script, diag: script.diag || diagnose(section) };
+
+  reportProgress(section, "running", scriptOk
+    ? `Script kết luận "${script.detail}" — AI kiểm tra lại…`
+    : `Script không đọc được (${script.error || "không rõ"}) — AI tự làm…`);
+  const ai = await withDeadline(`ai:${section}`, runAiAgent(section, scriptOk ? { verifyClaim: script.detail } : { hint: script.error }), AGENT_BUDGET_MS[section]);
+  if (ai.ok && ai.data) return { ...ai, steps: [...(script.steps || []), ...(ai.steps || [])] };
+  // AI không làm được (hết quota ngày / cấu hình sai / hết giờ): giữ kết luận của script nếu có, ghi rõ chưa được AI kiểm.
+  if (scriptOk) return { ...script, detail: `${script.detail} (AI chưa kiểm được: ${ai.error})` };
+  return { ok: false, source: "ai", error: `Script: ${script.error || "lỗi"}; AI: ${ai.error}`, steps: [...(script.steps || []), ...(ai.steps || [])], diag: script.diag || diagnose(section) };
+}
 var summarize = (section, data, source) => {
   const via = source === "ai" ? " (AI)" : "";
   if (section === "menu") {
@@ -302,8 +361,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       for (const [section, collect, label] of sections) {
         if (!missing.includes(section)) continue;
-        reportProgress(section, "running", "Script đang đọc trang…");
-        const res = await withDeadline(section, collect());
+        const res = await collectSection(section, collect);
         if (res.ok && res.data) {
           if (section === "menu") data.menu = { ...res.data, source: res.source };
           else if (section === "attributes") data.attributes = { ...res.data, source: res.source };
@@ -311,7 +369,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           reportProgress(section, "done", res.detail || summarize(section, res.data, res.source));
         } else {
           errors.push(`${label}: ${res.error || "không lấy được"}`);
-          reportProgress(section, "failed", res.error || "Không lấy được");
+          reportProgress(section, "failed", res.error || "Không lấy được", res.diag || diagnose(section));
         }
         if (res.steps) steps.push(...res.steps);
       }

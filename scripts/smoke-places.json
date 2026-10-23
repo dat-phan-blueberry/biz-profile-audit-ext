@@ -1,0 +1,6 @@
+[
+  { "query": "Bếp Mẹ Ỉn - Lê Thánh Tôn", "minAttributes": 20 },
+  { "query": "Chuyện Ba Bữa Signature", "minAttributes": 10, "minMenuItems": 30 },
+  { "query": "Pizza 4P's Lê Thánh Tôn", "minAttributes": 10 },
+  { "query": "SON - Bếp Nhà Đãi Khách Viet Kitchen", "minAttributes": 10 }
+]

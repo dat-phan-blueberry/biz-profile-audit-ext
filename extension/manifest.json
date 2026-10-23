@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Địa Bạ - Google Maps Profiler",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Thu thập dữ liệu bổ sung từ Google Maps khi đã đăng nhập (Menu, Tiện ích, Giờ đặc biệt)",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtUzGkJ6Sn3v7E3KksXzLRhhoEQbYZI7aaBcs6ELSe62Qiyzh5aBHGJgom5XQuJpHsNFXczQ4RxP+SrQIwXANRttA2IFqxhevaYU4tnDMLjKhWA+RKJCmg35wnTrLZcRgLeM8vrojy1EM1uDp0w7kRIUvJ8oZeqTpkO3nHYe2G1XmKn+TuMuHatc3pE7AYquClrWsHVUm35D0HsMmsg4cVdQ+0XRCiMmAL3kONP6f11x0NwiWO56T8ePJ9qeiVoiP2dv5SUDJQ5jhw4Mk8VmqUyHssqo1BeGI/FjpJvJ3XeZee0FkrPji2YzdectpNJzFFrzDm7Bsf/iHSC5x0YeipwIDAQAB",
   "permissions": [

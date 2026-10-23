@@ -1,33 +1,67 @@
-# Phát hành extension lên GitHub Releases khi đẩy tag vX.Y.Z (phải khớp "version" trong extension/manifest.json).
-# Web Địa Bạ đọc release mới nhất của repo này để hiện nút tải và nhắc cập nhật.
+# CI/CD extension: push lên main có đổi extension/ → kiểm → tự chọn version → đóng gói → tạo GitHub Release.
+# Dev chỉ commit + push. Version: manifest cao hơn tag mới nhất thì dùng đúng số đó (bản lớn, vd 1.2.0);
+# không thì tự tăng patch (1.1.1 → 1.1.2) và bot commit lại manifest ("[skip ci]", không chạy lại workflow).
+# Web Địa Bạ đọc release mới nhất của repo này để hiện nút tải và nhắc sale cập nhật.
 name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths: ["extension/**"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # cần toàn bộ tag để chọn version
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Đóng gói extension
+      - name: Kiểm cú pháp extension
+        run: |
+          for f in extension/*.js; do node --check "$f"; done
+          node -e 'JSON.parse(require("fs").readFileSync("extension/manifest.json", "utf8"))'
+
+      - name: Chọn version
+        id: ver
+        run: node scripts/next-version.mjs >> "$GITHUB_OUTPUT"
+
+      - name: Ghi version tự tăng vào manifest
+        if: steps.ver.outputs.bumped == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): v${{ steps.ver.outputs.version }} [skip ci]"
+          git push
+
+      - name: Đóng gói
         id: pack
         run: echo "zip=$(node scripts/pack-extension.mjs)" >> "$GITHUB_OUTPUT"
 
       - name: Tạo GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          PREVIOUS: ${{ steps.ver.outputs.previous }}
+          ZIP: ${{ steps.pack.outputs.zip }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.zip }}" \
-            --title "Địa Bạ - Google Maps Profiler $GITHUB_REF_NAME" \
-            --notes "Tải file .zip bên dưới → chuột phải → Giải nén tất cả → kéo thư mục vừa giải nén vào trang tiện ích của trình duyệt (bật Chế độ dành cho nhà phát triển). Hướng dẫn có hình trên web Địa Bạ. Cập nhật: làm lại y hệt với bản mới, trình duyệt tự thay bản cũ."
+          RANGE="${PREVIOUS:+$PREVIOUS..}HEAD"
+          {
+            echo "Thay đổi:"
+            git log --no-merges --format='- %s' "$RANGE" -- extension | grep -v '\[skip ci\]' | head -30
+            echo
+            echo "Cài / cập nhật: tải file .zip bên dưới → chuột phải → Giải nén tất cả → kéo thư mục vừa giải nén vào trang tiện ích của trình duyệt (bật Chế độ dành cho nhà phát triển). Bản mới tự thay bản cũ. Hướng dẫn có hình trên web Địa Bạ."
+          } > notes.md
+          gh release create "v$VERSION" "$ZIP" --target "$(git rev-parse HEAD)" --title "Địa Bạ - Google Maps Profiler v$VERSION" --notes-file notes.md

@@ -4,9 +4,11 @@
 
 Extension trình duyệt (Manifest V3, Chrome / Edge / Brave) chuyên dụng cho đội ngũ Sale và chuyên viên tư vấn GoDine nhằm thu thập các dữ liệu bổ sung bị Google Maps ẩn khi chưa đăng nhập (Menu chữ, Tab Giới thiệu / Tiện ích, Giờ đặc biệt).
 
-## Kiến trúc lai (Hybrid Extraction)
-1. **Script cố định (Ưu tiên số 1)**: Thao tác DOM chuẩn qua `aria-label`, `role`, và văn bản hiển thị (hỗ trợ cả tiếng Việt và tiếng Anh). Không dựa vào class CSS bị mã hóa ngẫu nhiên.
-2. **AI Fallback (Tự động kích hoạt khi script gãy)**: Nếu script không tìm thấy tab hoặc bóc tách ra 0 mục, extension sẽ chụp tóm tắt text của khung bên trái và danh sách nút bấm, nhờ web Địa Bạ gửi lên AI (máy chủ Địa Bạ giữ key, extension không giữ). AI trả về hành động: `{ "action": "click", "index": N }`, `{ "action": "extract", "data": {...} }`, hoặc `{ "action": "give_up" }` (tối đa 6 bước mỗi phần).
+## Kiến trúc: script là đường tắt, AI agent đảm bảo hoàn thành
+1. **Script** (`extension/content.js`) đọc DOM Maps cho nhanh, không tốn AI. Script lỗi, hết giờ hoặc ra 0 → giao cho AI agent. Script kết luận "không có" (không menu chữ, không tab Giới thiệu, không bảng giờ) → AI kiểm lại.
+2. **AI agent** (`extension/ai-fallback.js`) như một browser MCP thu nhỏ: nhìn trang qua bản chụp có đánh số phần tử (kèm `aria-label`), bấm / cuộn / chờ / đọc từng nhóm, một lượt AI riêng trích dữ liệu theo khúc, kiểm kết quả có thật trên trang; kết luận "không có" chỉ được nhận khi đã mở đúng tab và đọc. Chỉ dừng khi **hết quota AI trong ngày**, cấu hình AI sai, hoặc phiên bị huỷ (20 phút). Bị giới hạn theo phút (429) thì chờ đúng thời gian gateway báo rồi làm tiếp.
+3. AI đi qua web Địa Bạ → AI Gateway bằng token ngắn hạn (extension không giữ key). Web chỉ báo lỗi khi extension im lặng quá 2 phút.
+4. **Kiểm thử AI**: trang Options có ô "Kiểm thử AI: bỏ qua script" để bắt AI tự làm mọi mục.
 
 ---
 
@@ -24,15 +26,21 @@ Không cần cấu hình gì thêm:
 - **ID cố định** `coonkgehlckihibjghcejllijbhjjknd` nhờ trường `key` trong `manifest.json` (cài ở thư mục nào cũng ra cùng ID; web dùng sẵn ID này).
 - **AI fallback**: web Địa Bạ xin token ngắn hạn (10 phút) từ máy chủ rồi gọi thẳng AI Gateway; extension không giữ key. Trang Options chỉ dùng khi test tay từ popup.
 
-## Phát hành bản mới (dev)
+## Phát hành bản mới (dev) — CI/CD tự động
 
-1. Tăng `version` trong `extension/manifest.json`. Web Địa Bạ nhắc cập nhật khi bản cài cũ hơn release mới nhất; chặn thu thập khi cũ hơn `REQUIRED_EXTENSION_VERSION` (repo web, `src/lib/extension-bridge.ts`).
-2. Commit, tạo tag `vX.Y.Z` (đúng bằng version) và đẩy tag lên GitHub.
-3. Workflow `.github/workflows/release.yml` kiểm tag khớp manifest, đóng gói zip phẳng (`scripts/pack-extension.mjs`) và tạo Release kèm `diaba-extension-vX.Y.Z.zip`.
-4. Chạy thử đóng gói ở máy: `node scripts/pack-extension.mjs` → `dist/`.
-5. Đổi quyền/host trong `manifest.json` thì kiểm lại `externally_connectable` (các domain web Địa Bạ được gọi extension).
+**Chỉ cần commit + push lên `main`.** Có thay đổi trong `extension/` là workflow `.github/workflows/release.yml` tự:
+1. Kiểm cú pháp các file JS và `manifest.json`.
+2. Chọn version (`scripts/next-version.mjs`): `version` trong manifest cao hơn release mới nhất thì dùng đúng số đó (tự đặt khi ra bản lớn, vd `1.2.0`); không thì tự tăng patch (`1.1.1` → `1.1.2`) và bot commit lại manifest (`[skip ci]`).
+3. Đóng gói zip phẳng (`scripts/pack-extension.mjs`) và tạo GitHub Release `vX.Y.Z` kèm `diaba-extension-vX.Y.Z.zip`, ghi chú lấy từ các commit.
 
----
+Web Địa Bạ tự thấy bản mới và nhắc sale cập nhật. Đổi chỉ README/scripts thì không phát hành.
+Chặn thu thập với bản quá cũ: nâng `REQUIRED_EXTENSION_VERSION` ở web (`src/lib/extension-bridge.ts`).
+
+Trước khi push thay đổi `content.js` / `ai-fallback.js`, chạy smoke test ở máy (cần profile Chrome đã đăng nhập Google, không chạy được trên CI):
+- Script: `PROFILE=<profile> node scripts/smoke-maps.cjs --slow`
+- AI agent (tắt script, tốn quota ~20–60 lượt/quán): `PROFILE=<profile> ENV_FILE=<.env web Địa Bạ> node scripts/smoke-maps.cjs --ai`
+
+Giao diện trang tiện ích đổi thì quay lại GIF ở repo web: `node scripts/record-extension-guides.cjs`.
 
 ## Cách kiểm tra và sử dụng
 
@@ -52,6 +60,9 @@ Dev: cài thẳng thư mục `extension/` của repo bằng **Tải tiện ích 
 4. Bấm nút, Extension sẽ ngầm mở tab Maps tới quán, thu thập dữ liệu còn thiếu, đóng tab và tự động cập nhật vào hồ sơ trên màn hình.
 
 ---
+
+## Khi sale báo lỗi
+Mục nào lỗi, web hiện nút **Sao chép chẩn đoán** (quán, bản extension, các tab, tiêu đề nhóm, nhãn aria, đoạn chữ đầu của panel Maps lúc lỗi). Dán nội dung đó để sửa `extension/content.js` đúng chỗ, thêm quán vào `scripts/smoke-places.json` rồi chạy lại smoke test.
 
 ## Giới hạn & Lưu ý
 - **Trình duyệt**: Chrome, Edge, Brave (và trình duyệt Chromium khác) trên máy tính. Firefox chưa hỗ trợ `externally_connectable`, Safari cần đóng gói qua Xcode → chưa hỗ trợ.

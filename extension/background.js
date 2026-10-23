@@ -60,8 +60,8 @@ function waitForTabLoad(tabId, timeoutMs = 20000) {
 const progressByTab = new Map();
 // Tab thu thập đang chạy → hàm nhờ web gọi AI (web dùng phiên đăng nhập + key phía server Địa Bạ).
 const llmByTab = new Map();
-// Cả phiên tối đa 170s (3 mục × 60s + mở trang); web đặt hạn 180s.
-const COLLECT_TIMEOUT_MS = 170000;
+// Cả phiên tối đa 20 phút: AI agent có thể phải chờ quota theo phút. Web chỉ báo lỗi khi 2 phút không có tiến trình.
+const COLLECT_TIMEOUT_MS = 20 * 60000;
 
 async function collectFromMapsUrl(mapsUrl, missing = ["menu", "attributes", "special_hours"], onProgress = () => {}, askLlm = null) {
   let tab = null;
@@ -158,7 +158,7 @@ chrome.runtime.onConnectExternal.addListener((port) => {
   const askLlm = (body) => new Promise((resolve) => {
     if (closed) return resolve({ ok: false, error: "Trang Địa Bạ đã đóng kết nối." });
     const id = ++llmSeq;
-    const timer = setTimeout(() => { pendingLlm.delete(id); resolve({ ok: false, error: "AI không phản hồi sau 25s" }); }, 25000);
+    const timer = setTimeout(() => { pendingLlm.delete(id); resolve({ ok: false, error: "AI không phản hồi sau 33s" }); }, 33000);
     pendingLlm.set(id, (r) => { clearTimeout(timer); resolve(r); });
     post({ type: "llm", id, body });
   });
@@ -166,7 +166,10 @@ chrome.runtime.onConnectExternal.addListener((port) => {
   port.onMessage.addListener(async (message) => {
     if (message?.type === "llm_result") {
       const done = pendingLlm.get(message.id);
-      if (done) { pendingLlm.delete(message.id); done({ ok: !!message.ok, data: message.data, error: message.error }); }
+      if (done) {
+        pendingLlm.delete(message.id);
+        done({ ok: !!message.ok, data: message.data, error: message.error, status: message.status, retryAfterSeconds: message.retryAfterSeconds, quotaPeriod: message.quotaPeriod });
+      }
       return;
     }
     if (message?.type !== "diaba:collect") return;
@@ -214,10 +217,16 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
  * 2. Lắng nghe thông điệp nội bộ (từ popup hoặc content script)
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Agent trong tab chạy ngầm nhờ background đếm giờ (Chrome bóp setTimeout của tab ẩn lâu).
+  if (message.type === "diaba:sleep") {
+    setTimeout(() => sendResponse(true), Math.min(Math.max(Number(message.ms) || 0, 0), 60000));
+    return true;
+  }
+
   // Tiến trình từ content script của tab đang thu thập → web
   if (message.type === "diaba:progress") {
     const relay = sender.tab && progressByTab.get(sender.tab.id);
-    if (relay) relay({ stage: "section", section: message.section, status: message.status, detail: message.detail });
+    if (relay) relay({ stage: "section", section: message.section, status: message.status, detail: message.detail, diag: message.diag });
     return false;
   }
 
