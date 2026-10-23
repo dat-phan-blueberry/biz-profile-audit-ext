@@ -1,0 +1,33 @@
+# Phát hành extension lên GitHub Releases khi đẩy tag vX.Y.Z (phải khớp "version" trong extension/manifest.json).
+# Web Địa Bạ đọc release mới nhất của repo này để hiện nút tải và nhắc cập nhật.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Đóng gói extension
+        id: pack
+        run: echo "zip=$(node scripts/pack-extension.mjs)" >> "$GITHUB_OUTPUT"
+
+      - name: Tạo GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "${{ steps.pack.outputs.zip }}" \
+            --title "Địa Bạ - Google Maps Profiler $GITHUB_REF_NAME" \
+            --notes "Tải file .zip bên dưới → chuột phải → Giải nén tất cả → kéo thư mục vừa giải nén vào trang tiện ích của trình duyệt (bật Chế độ dành cho nhà phát triển). Hướng dẫn có hình trên web Địa Bạ. Cập nhật: làm lại y hệt với bản mới, trình duyệt tự thay bản cũ."

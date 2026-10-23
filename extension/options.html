@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Cài đặt AI Gateway - Địa Bạ Extension</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      max-width: 480px;
+      margin: 30px auto;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      padding: 24px;
+      color: #1e293b;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+    h1 { font-size: 18px; font-weight: 700; margin-bottom: 8px; color: #0f172a; }
+    p.desc { font-size: 13px; color: #64748b; margin-bottom: 20px; line-height: 1.5; }
+    .field { margin-bottom: 16px; }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #334155; }
+    input[type="text"], input[type="password"] {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: #0f766e; }
+    .hint { font-size: 11px; color: #94a3b8; margin-top: 4px; }
+    button {
+      background: #0f766e;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover { background: #115e59; }
+    #msg { margin-top: 12px; font-size: 12px; font-weight: 600; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <h1>Cấu hình AI Gateway</h1>
+  <p class="desc">
+    Cấu hình địa chỉ AI Gateway và Gateway Key để kích hoạt tính năng AI Fallback khi script bóc tách giao diện Google Maps bị thay đổi.
+  </p>
+
+  <div class="field">
+    <label for="gatewayUrl">Địa chỉ AI Gateway</label>
+    <input type="text" id="gatewayUrl" placeholder="http://localhost:8000">
+    <p class="hint">Ví dụ: http://localhost:8000 hoặc URL gateway đã deploy trên Koyeb</p>
+  </div>
+
+  <div class="field">
+    <label for="gatewayKey">Gateway API Key (x-api-key)</label>
+    <input type="password" id="gatewayKey" placeholder="sec-diaba-xxx">
+    <p class="hint">Khóa xác thực dịch vụ được cấu hình trên Gateway</p>
+  </div>
+
+  <button id="btnSave">Lưu cấu hình</button>
+  <div id="msg"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>
