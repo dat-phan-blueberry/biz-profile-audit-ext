@@ -15,7 +15,11 @@ var AGENT_MAX_REFS = 80;
 var AGENT_TEXT_PREVIEW = 1200;
 /** Lượt trích dữ liệu: chia nội dung thành từng khúc ~3.500 ký tự (khúc lớn dễ bị cắt câu trả lời → mất món). */
 var AGENT_EXTRACT_CHUNK = 3500;
-var AGENT_CALL_TIMEOUT_MS = 36000;
+/** Cầu dao: tối đa 80 lượt AI mỗi mục (bình thường menu ~13–25, tiện ích ~4, giờ ~6) — chặn vòng lặp lỗi đốt quota. */
+var AGENT_MAX_CALLS = 80;
+/** Mỗi lượt gọi AI cách nhau ≥ 2s (kể cả khi thử lại). */
+var AGENT_MIN_GAP_MS = 2000;
+var agentLastCallAt = 0;
 
 var agentNorm = (s) => (s || "").replace(/\s+/g, " ").trim();
 var agentFold = (s) => agentNorm(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
@@ -45,21 +49,29 @@ async function agentLlm(ctx, messages, maxTokens) {
   let transient = 0;
   for (;;) {
     ctx.checkStop();
+    if (ctx.attempts >= AGENT_MAX_CALLS) throw agentError(`Vượt ${AGENT_MAX_CALLS} lượt gọi AI cho mục này (chặn vòng lặp lỗi)`, "budget");
+    const gap = agentLastCallAt + AGENT_MIN_GAP_MS - Date.now();
+    if (gap > 0) await agentSleep(gap);
+    agentLastCallAt = Date.now();
     let res;
     try {
+      // Không chạy đua với đồng hồ: chờ request trả về (web huỷ sau 30s, background sau 33s) rồi mới gọi lượt mới —
+      // tránh bắn request mới khi request cũ vẫn đang tới provider.
       res = typeof window.__diabaLlmCall === "function"
         ? await window.__diabaLlmCall(body) // smoke test chạy ngoài extension
-        : await Promise.race([
-          chrome.runtime.sendMessage({ type: "diaba:llm_chat", body }),
-          agentSleep(AGENT_CALL_TIMEOUT_MS).then(() => ({ ok: false, status: 504, error: "AI không phản hồi" })),
-        ]);
+        : await chrome.runtime.sendMessage({ type: "diaba:llm_chat", body });
     } catch (err) {
       res = { ok: false, status: 0, error: err.message };
     }
+    // Lượt bị chặn 429 (gateway không gọi provider) không tính vào cầu dao: chờ quota không phải vòng lặp lỗi.
+    if (res?.status !== 429) ctx.attempts++;
     if (res?.ok) {
       ctx.calls++;
       const content = res.data?.choices?.[0]?.message?.content || "";
-      try { return JSON.parse(content); } catch { return { __invalid: content.slice(0, 300) }; }
+      try { return JSON.parse(content); } catch { /* có model (qua 9router) bọc JSON trong ```json … ``` hoặc thêm chữ */ }
+      const block = content.match(/\{[\s\S]*\}/);
+      try { if (block) return JSON.parse(block[0]); } catch { /* vẫn không phải JSON */ }
+      return { __invalid: content.slice(0, 300) };
     }
     if (res?.status === 429 && res.quotaPeriod === "day") throw agentError("Hết quota AI trong ngày", "quota");
     if (res?.status === 429) {
@@ -302,7 +314,7 @@ Quy tắc: làm việc đến khi xong mục tiêu, không bỏ cuộc. Bấm m�
 async function runAiAgent(section, opts = {}) {
   const stopKey = `ai:${section}`;
   const ctx = {
-    section, step: 0, calls: 0, reads: 0, seen: "", clicked: [], log: [],
+    section, step: 0, calls: 0, attempts: 0, reads: 0, seen: "", clicked: [], log: [],
     menu: new Map(), attrs: new Map(), special: [], hoursSeen: false,
     progress: (detail) => { if (typeof reportProgress === "function") reportProgress(section, "running", detail); },
     checkStop: () => { if (window.__diabaStop?.[stopKey]) throw agentError("Dừng vì hết thời gian của phiên", "stopped"); },
