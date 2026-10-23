@@ -22,7 +22,7 @@ Web Địa Bạ tự nhận khi chưa cài hoặc có bản mới, và hiện n�
 
 Không cần cấu hình gì thêm:
 - **ID cố định** `coonkgehlckihibjghcejllijbhjjknd` nhờ trường `key` trong `manifest.json` (cài ở thư mục nào cũng ra cùng ID; web dùng sẵn ID này).
-- **AI fallback** đi qua web Địa Bạ (`/api/extension-llm`, dùng phiên đăng nhập và key phía server). Trang Options chỉ dùng khi test tay từ popup.
+- **AI fallback**: web Địa Bạ xin token ngắn hạn (10 phút) từ máy chủ rồi gọi thẳng AI Gateway; extension không giữ key. Trang Options chỉ dùng khi test tay từ popup.
 
 ## Phát hành bản mới (dev)
 
